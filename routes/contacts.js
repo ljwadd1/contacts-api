@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { PrismaClient } from '@prisma/client';
+import fs from 'fs';  // file system module to delete uploaded images
 
 const router = express.Router();
 
@@ -29,6 +30,7 @@ router.get('/all', async (req, res) => {
   res.json(contacts);
 });
 
+
 // Get a contact by id
 router.get('/get/:id', async (req, res) => {
   const id = req.params.id;
@@ -52,8 +54,9 @@ router.get('/get/:id', async (req, res) => {
   }  
 });
 
+
 // Add a new contact
-router.post('/create', upload.single('image'), async (req, res) => {
+router.post('/create', upload.single('filename'), async (req, res) => {
   const { firstName, lastName, phone, email, title } = req.body;  
   const filename = req.file ? req.file.filename : null;
   
@@ -81,40 +84,108 @@ router.post('/create', upload.single('image'), async (req, res) => {
   res.json(contact);
 });
 
+
 // Update a contact by id
-router.put('/update/:id', upload.single('image'), (req, res) => {
-  const id = req.params.id;
+router.put('/update/:id', upload.single('filename'), async (req, res) => {
 
   // Capture inputs
+  const id = req.params.id;
+  const { firstName, lastName, phone, email, title } = req.body;
+  const newFilename = req.file ? req.file.filename : null;
 
   // Validate id
+  if(isNaN(id)){
+    return res.status(400).json({ message: 'Invalid contact id.' });
+  }
 
   // Validate required fields
+  if(!firstName || !lastName || !phone || !email) {
+    return res.status(400).json({ message: 'Required fields must have a value.' });
+  }
+
+  // TODO: Add additional validations (optional)
 
   // Find contact by id (if not found, return 404)
+  const contact = await prisma.contact.findUnique({
+    where: {
+      id: parseInt(id),
+    },
+  });
 
-  // Store filename in a variable
+  if(contact === null){
+    return res.status(404).json({ message: 'Contact not found.' });
+  }
 
   // If file was uploaded: save the filename and delete old file, else: save the old filename
+  if(newFilename && contact.filename){
+    fs.unlink('public/images/' + contact.filename, (err) => {
+      if (err) {
+        console.error(err)
+        return res.status(500).json({ message: 'Error deleting old file.' });
+      }
+    });
+  }
 
   // Update record in database with prisma (saving either old or new filename)
+  const updatedContact = await prisma.contact.update({
+    where: {
+      id: parseInt(id),
+    },
+    data: {
+      firstName: firstName,
+      lastName: lastName,
+      title: title,
+      phone: phone,
+      email: email,
+      filename: newFilename || contact.filename,
+    },
+  });
 
-  res.send('Update a contact by ' + id);
+  res.json(updatedContact);
 });
 
+
 // Delete a contact id
-router.delete('/delete/:id', (req, res) => {
+router.delete('/delete/:id', async (req, res) => {
   const id = req.params.id;
 
   // to-do: verify :id is a number
+  if(isNaN(id)){
+    res.status(400).json({ message: 'Invalid contact id.' });
+    return;
+  }
 
   // find the contact by id (if not found, return 404)
+  const contact = await prisma.contact.findUnique({
+    where: {
+      id: parseInt(id),
+    },
+  });
 
-  // delete the record with prisma
+  if(contact === null){
+    res.status(404).json({ message: 'Contact not found.' });
+    return;
+  }
 
   // Delete the file (if contact has one)
+  if(contact.filename){
+    fs.unlink('public/images/' + contact.filename, (err) => {
+      if (err) {
+        console.error(err)
+        return res.status(500).json({ message: 'Error deleting file.' });
+      }
+    });
+  }
 
-  res.send('Delete a contact by id ' + id);
+  // delete the record with prisma
+  const deletedContact = await prisma.contact.delete({
+    where: {
+      id: parseInt(id),
+    },
+  });
+
+
+  res.send({ message: 'Delete a contact by id ' + id });
 });
 
 
